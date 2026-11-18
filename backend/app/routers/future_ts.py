@@ -6,8 +6,10 @@ from app.modules.future_ts_hold import (
     ClockError,
     HoldError,
     advance_clock,
+    audit_clock_binding,
     get_clock,
     list_holds,
+    list_promotion_batches,
     list_proofs,
     promote,
     set_clock,
@@ -24,6 +26,8 @@ class ClockBody(BaseModel):
 class PromoteBody(BaseModel):
     keys: list[str] | None = None
     batch_id: str | None = None
+    expected_clock_version: int | None = None
+    expected_clock_ts: str | None = None
 
 
 @router.get("/clock")
@@ -73,15 +77,28 @@ def read_holds(
 
 @router.post("/holds/promote")
 def promote_holds(body: PromoteBody | None = None):
-    """显式晋升 / 到达扫描。业务钟未到的键拒绝晋升。"""
+    """显式晋升 / 到达扫描。到期判定绑定装载同一业务钟，业务钟未到的键拒绝晋升。
+
+    可传 `expected_clock_version` / `expected_clock_ts` 固定扫描口径：
+    与当前业务钟不一致时拒绝，防止读到另一套钟。
+    """
     body = body or PromoteBody()
     conn = connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        result = promote(conn, batch_id=body.batch_id, keys=body.keys)
+        result = promote(
+            conn,
+            batch_id=body.batch_id,
+            keys=body.keys,
+            expected_clock_version=body.expected_clock_version,
+            expected_clock_ts=body.expected_clock_ts,
+        )
         conn.commit()
         return {"ok": True, **result}
     except HoldError as e:
+        conn.rollback()
+        raise HTTPException(409, str(e)) from e
+    except ClockError as e:
         conn.rollback()
         raise HTTPException(409, str(e)) from e
     except Exception as e:  # noqa: BLE001
@@ -101,5 +118,31 @@ def read_hold_proofs(
     conn = connect()
     try:
         return list_proofs(conn, batch_id=batch_id, clock_version=clock_version, limit=limit)
+    finally:
+        conn.close()
+
+
+@router.get("/promotion-batches")
+def read_promotion_batches(
+    clock_version: int | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """晋升批次不可变钟读数快照（只读）。"""
+    conn = connect()
+    try:
+        return list_promotion_batches(conn, clock_version=clock_version, limit=limit)
+    finally:
+        conn.close()
+
+
+@router.get("/clock-audit")
+def read_clock_audit(waybill_id: str | None = None):
+    """双钟核证（只读）：逐点核对装载钟与晋升钟同源，且正式线/暂缓抽屉互斥可见。
+
+    基线所无的新增只读接口；任何写入路径都不会经过它。
+    """
+    conn = connect()
+    try:
+        return audit_clock_binding(conn, waybill_id=waybill_id)
     finally:
         conn.close()

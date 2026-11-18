@@ -6,10 +6,12 @@ const waybills = ref([])
 const selected = ref(null)
 const detail = ref(null)
 const overview = ref(null)
+const audit = ref(null)
 const err = ref('')
 
 async function loadList() {
   overview.value = await api.overview()
+  audit.value = await api.clockAudit()
   waybills.value = await api.waybills()
   if (!selected.value && waybills.value.length) {
     selected.value = waybills.value[0].id
@@ -37,6 +39,9 @@ const hops = computed(() => detail.value?.hops || [])
 const proof = computed(() => detail.value?.proof)
 const held = computed(() => detail.value?.held || [])
 const promoted = computed(() => detail.value?.promoted || [])
+const selectedAudit = computed(
+  () => (audit.value?.points || []).filter((p) => p.waybill_id === selected.value),
+)
 </script>
 
 <template>
@@ -111,7 +116,17 @@ const promoted = computed(() => detail.value?.promoted || [])
         <dl class="kv">
           <dt>暂缓中</dt><dd>{{ held.length }}</dd>
           <dt>已晋升</dt><dd>{{ promoted.length }}</dd>
+          <dt>双钟核证</dt>
+          <dd :style="{ color: audit?.tear_free ? 'var(--mint)' : 'var(--danger)' }">
+            {{ audit ? (audit.tear_free ? '同源 · 互斥可见' : '检出撕裂') : '—' }}
+          </dd>
         </dl>
+        <ul class="kv" style="list-style:none;padding:0;margin:0 0 10px" v-if="selectedAudit.length">
+          <li v-for="p in selectedAudit" :key="p.hold_key" style="font-size:12px" class="muted">
+            {{ p.status === 'held' ? '暂缓' : '晋升' }} · {{ p.verdict }}
+            <template v-if="p.promoted_clock_ts"> · 晋升钟 {{ p.promoted_clock_ts }}</template>
+          </li>
+        </ul>
         <router-link class="hold-link" to="/holds">去暂缓页处理 →</router-link>
       </aside>
 

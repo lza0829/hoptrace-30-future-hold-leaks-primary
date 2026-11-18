@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 from app.db import FIXTURES_DIR, connect
-from app.modules.future_ts_hold.clock import DEFAULT_CLOCK_TS
-from app.modules.future_ts_hold.schema import HOLD_SCHEMA
+from app.modules.future_ts_hold.clock import DEFAULT_CLOCK_TS, get_clock, record_clock_reading
+from app.modules.future_ts_hold.schema import HOLD_SCHEMA, migrate_hold_schema
 
 
 SCHEMA = """
@@ -65,10 +65,13 @@ def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
     conn.executescript(HOLD_SCHEMA)
+    migrate_hold_schema(conn)
     conn.execute(
         "INSERT OR IGNORE INTO clock_config(id, clock_ts, version, updated_at) VALUES (1,?,?,?)",
         (DEFAULT_CLOCK_TS, 1, "2026-11-17T00:00:00Z"),
     )
+    clock = get_clock(conn)
+    record_clock_reading(conn, clock["clock_ts"], clock["version"])
     n = conn.execute("SELECT COUNT(*) AS c FROM waybills").fetchone()["c"]
     if n == 0:
         _seed_fixtures(conn)

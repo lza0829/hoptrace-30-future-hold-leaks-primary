@@ -7,7 +7,10 @@ from app.modules.future_ts_hold import (
     get_clock,
     hold_key_of,
     insert_hold,
+    record_clock_reading,
+    settle_formal_hold,
     split_by_clock,
+    verify_clock_reading,
     write_proof,
 )
 from app.services.timeline import recompute_projection
@@ -31,10 +34,13 @@ def run_batch(batch_path=None) -> dict:
     try:
         conn.execute("BEGIN IMMEDIATE")
         clock = get_clock(conn)
+        record_clock_reading(conn, clock["clock_ts"], clock["version"])
+        verify_clock_reading(conn, clock["clock_ts"], clock["version"])
         formal, future = split_by_clock(hops, clock["clock_ts"])
 
         written = 0
         touched: set[str] = set()
+        settled: list[str] = []
         for hop in formal:
             wid = hop["waybill_id"]
             if not conn.execute("SELECT 1 FROM waybills WHERE id=?", (wid,)).fetchone():
@@ -58,6 +64,11 @@ def run_batch(batch_path=None) -> dict:
             )
             if cur.rowcount:
                 written += 1
+            # 同键点在暂缓抽屉里（业务钟回拨后重放）：装载钟已放行到正式线，
+            # 抽屉必须同步收口，否则同点双边可见。
+            key = settle_formal_hold(conn, hop, batch_id, clock)
+            if key:
+                settled.append(key)
             touched.add(wid)
 
         held: list[str] = []
@@ -94,10 +105,12 @@ def run_batch(batch_path=None) -> dict:
             "held_keys": held,
             "skipped_promoted": len(skipped),
             "skipped_keys": skipped,
+            "settled_holds": settled,
         }
         conclusion = (
             f"业务钟 {clock['clock_ts']}(v{clock['version']})："
             f"正式写入 {written} 点，暂缓 {len(held)} 点"
+            + (f"，{len(settled)} 点暂缓抽屉随装载收口" if settled else "")
             + (f"，{len(skipped)} 点已晋升不再回退" if skipped else "")
         )
         report["conclusion"] = conclusion
@@ -108,7 +121,7 @@ def run_batch(batch_path=None) -> dict:
             clock_ts=clock["clock_ts"],
             clock_version=clock["version"],
             held=held,
-            promoted=[],
+            promoted=settled,
             conclusion=conclusion,
         )
         conn.execute(

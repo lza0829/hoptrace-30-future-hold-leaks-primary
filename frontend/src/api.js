@@ -24,8 +24,16 @@ export const api = {
   setClock: (clockTs) =>
     req('/api/clock', { method: 'POST', body: JSON.stringify({ clock_ts: clockTs }) }),
   holds: (status) => req(status ? `/api/holds?status=${encodeURIComponent(status)}` : '/api/holds'),
-  promote: (keys) =>
-    req('/api/holds/promote', { method: 'POST', body: JSON.stringify(keys ? { keys } : {}) }),
+  promote: (keys, clock) =>
+    req('/api/holds/promote', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(keys ? { keys } : {}),
+        ...(clock
+          ? { expected_clock_version: clock.version, expected_clock_ts: clock.clock_ts }
+          : {}),
+      }),
+    }),
   holdProofs: (params = {}) => {
     const q = new URLSearchParams()
     if (params.batch_id) q.set('batch_id', params.batch_id)
@@ -33,4 +41,12 @@ export const api = {
     const qs = q.toString()
     return req(`/api/hold-proofs${qs ? `?${qs}` : ''}`)
   },
+  promotionBatches: (clockVersion) =>
+    req(
+      clockVersion != null
+        ? `/api/promotion-batches?clock_version=${encodeURIComponent(clockVersion)}`
+        : '/api/promotion-batches',
+    ),
+  clockAudit: (waybillId) =>
+    req(waybillId ? `/api/clock-audit?waybill_id=${encodeURIComponent(waybillId)}` : '/api/clock-audit'),
 }

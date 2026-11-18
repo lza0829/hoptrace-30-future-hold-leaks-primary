@@ -36,11 +36,20 @@ npm run dev
 `event_ts` 晚于可配置业务钟的轨迹点不写正式时间线，先落 `future_holds` 暂缓表；
 业务钟走到后经显式晋升或到达扫描才入正式线并重算投影。业务钟回拨不回溯改写已正式点。
 
+**双钟同源**：装载闸与晋升扫描都只读 `clock_config` 的同一份业务钟读数，绝不使用墙钟。
+每个业务钟版本在 `clock_readings` 留一条不可变读数；晋升批次把扫描所用读数冻结成快照
+（`promotion_batches.clock_ts/clock_version`、`future_holds.promoted_clock_ts`），
+之后业务钟怎么回拨都不能改写已晋升点。任一点在任一时刻只在一侧可见：
+要么正式线，要么暂缓抽屉。
+
 | 接口 | 说明 |
 | --- | --- |
 | `GET/POST /api/clock` | 读写业务钟（`advance=true` 只许向前） |
 | `GET /api/holds?status=held` | 暂缓集合 |
-| `POST /api/holds/promote` | 显式晋升（传 `keys`）或到达扫描（不传） |
+| `POST /api/holds/promote` | 显式晋升（传 `keys`）或到达扫描（不传）；可带 `expected_clock_version` / `expected_clock_ts` 绑定扫描口径 |
 | `GET /api/hold-proofs?batch_id=&clock_version=` | 暂缓证明，按批次或钟版本可查 |
+| `GET /api/promotion-batches?clock_version=` | 晋升批次不可变钟读数快照 |
+| `GET /api/clock-audit?waybill_id=` | 双钟核证（只读）：逐点核对装载钟/晋升钟同源与互斥可见 |
 
-前端「暂缓」页可设定业务钟、看暂缓集合、触发晋升、查暂缓证明。
+前端「暂缓」页可设定业务钟、看暂缓集合、触发晋升、查暂缓证明、晋升批次与逐点双钟核证；
+「证明」页展示投影证明与核证结论，「测绘板」检查器显示当前运单的核证状态。
